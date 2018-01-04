@@ -17,6 +17,7 @@ using Microsoft.Owin.Security.OAuth;
 using OneOff.WebAPI.Models;
 using OneOff.WebAPI.Providers;
 using OneOff.WebAPI.Results;
+using static OneOff.WebAPI.ApplicationUserManager;
 
 namespace OneOff.WebAPI.Controllers
 {
@@ -26,16 +27,19 @@ namespace OneOff.WebAPI.Controllers
     {
         private const string LocalLoginProvider = "Local";
         private ApplicationUserManager _userManager;
+        private ApplicationRoleManager _roleManager;
 
         public AccountController()
         {
         }
 
         public AccountController(ApplicationUserManager userManager,
-            ISecureDataFormat<AuthenticationTicket> accessTokenFormat)
+            ISecureDataFormat<AuthenticationTicket> accessTokenFormat,
+            ApplicationRoleManager roleManager)
         {
             UserManager = userManager;
             AccessTokenFormat = accessTokenFormat;
+            RoleManager = roleManager;
         }
 
         public ApplicationUserManager UserManager
@@ -47,6 +51,18 @@ namespace OneOff.WebAPI.Controllers
             private set
             {
                 _userManager = value;
+            }
+        }
+
+        public ApplicationRoleManager RoleManager
+        {
+            get
+            {
+                return _roleManager ?? Request.GetOwinContext().GetUserManager<ApplicationRoleManager>();
+            }
+            private set
+            {
+                _roleManager = value;
             }
         }
 
@@ -74,6 +90,15 @@ namespace OneOff.WebAPI.Controllers
             var currentRoles = await this.UserManager.GetRolesAsync(appUser.Id);
 
             var rolesNotExist = rolesToAssign.Except(this.RoleManager.Roles.Select(x => x.Name)).ToArray();
+
+            if (rolesNotExist.Count() > 0)
+            {
+                ModelState.AddModelError("", string.Format("Roles '{0}' does not exist in the system", string.Join(",", rolesNotExist)));
+                return this.BadRequest(ModelState);
+            }
+
+            //  remove user from current roles, if any
+            IdentityResult removeResult = await this.UserManager.RemoveFromRolesAsync(appUser.Id, currentRoles.ToArray());
 
             if (!removeResult.Succeeded)
             {
@@ -371,6 +396,8 @@ namespace OneOff.WebAPI.Controllers
             }
 
             var user = new ApplicationUser() { UserName = model.Email, Email = model.Email };
+
+            user.IsDeleted = false;
 
             IdentityResult result = await UserManager.CreateAsync(user, model.Password);
 
